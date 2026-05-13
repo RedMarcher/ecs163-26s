@@ -1,243 +1,153 @@
-// Global Terrorism Database Dashboard - Bare-bones Starting Template
-// Setup the environment and shared variables
+// --- 1. Setup ---
 const width = window.innerWidth;
 const height = window.innerHeight;
 
-// Define margin and size variables for three visualization views
-// Chart 1: Temporal Overview (e.g., Line/Area chart) - Left Column, Top half
-let chart1Margin = {top: 40, right: 30, bottom: 50, left: 60},
-    chart1Width = (width * 0.48) - chart1Margin.left - chart1Margin.right,
-    chart1Height = (height * 0.45) - chart1Margin.top - chart1Margin.bottom;
-
-let chart1Left = chart1Margin.left,
-    chart1Top = chart1Margin.top;
-
-// Chart 2: Categorical Focus (e.g., Attack/Weapon type Bar chart) - Right Column, Top half
-let chart2Margin = {top: 40, right: 30, bottom: 50, left: 60},
-    chart2Width = (width * 0.48) - chart2Margin.left - chart2Margin.right,
-    chart2Height = (height * 0.45) - chart2Margin.top - chart2Margin.bottom;
-
-let chart2Left = (width * 0.5) + chart2Margin.left,
-    chart2Top = chart2Margin.top;
-
-// Chart 3: Advanced Focus (e.g., Sankey/Parallel Coordinates flow) - Bottom half
-let chart3Margin = {top: 40, right: 50, bottom: 60, left: 60},
-    chart3Width = width - chart3Margin.left - chart3Margin.right - 40,
-    chart3Height = (height * 0.42) - chart3Margin.top - chart3Margin.bottom;
-
-let chart3Left = chart3Margin.left,
-    chart3Top = (height * 0.52) + chart3Margin.top;
-
-// Main SVG Container
-const svg = d3.select("svg")
+// Select SVG and force a background color so we can see it
+const svg = d3.select("#main-svg")
               .attr("width", width)
-              .attr("height", height);
+              .attr("height", height)
+              .style("background-color", "#f8f9fa"); 
 
-// Centralized data container
-let globalTerrorData = [];
+// Layout Variables
+let chart1Margin = {top: 50, right: 20, bottom: 20, left: 20},
+    chart1Width = (width * 0.45),
+    chart1Height = (height * 0.45);
 
-// Row converter to optimize memory usage by pruning unused columns
+let chart2Margin = {top: 50, right: 20, bottom: 20, left: 20},
+    chart2Width = (width * 0.45),
+    chart2Height = (height * 0.45);
+
+let chart3Width = width - 100,
+    chart3Height = (height * 0.4);
+
+// --- 2. Row Converter ---
 function rowConverter(d) {
     return {
-        year: +d.iyear,
-        month: +d.imonth,
-        day: +d.iday,
-        country: d.country_txt,
-        region: d.region_txt,
-        latitude: d.latitude ? +d.latitude : null,
-        longitude: d.longitude ? +d.longitude : null,
-        success: +d.success,
-        suicide: +d.suicide,
-        attackType: d.attacktype1_txt,
-        targetType: d.targtype1_txt,
-        weaponType: d.weaptype1_txt,
-        groupName: d.gname,
+        success: +d.success === 1,
+        attackType: d.attacktype1_txt || "Unknown",
+        region: d.region_txt || "Unknown",
         nkill: d.nkill ? +d.nkill : 0,
-        nwound: d.nwound ? +d.nwound : 0,
-        casualties: (d.nkill ? +d.nkill : 0) + (d.nwound ? +d.nwound : 0)
+        latitude: d.latitude ? +d.latitude : null,
+        longitude: d.longitude ? +d.longitude : null
     };
 }
 
-// Ingest global terrorism dataset
-d3.csv("data/globalterrorismdb_0718dist.csv", rowConverter).then(rawData => {
-    // Save to shared asset variable
-    globalTerrorData = rawData;
+// --- 3. Load Data ---
+Promise.all([
+    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json"),
+    d3.csv("data/globalterrorismdb_0718dist.csv", rowConverter)
+]).then(([worldData, rawData]) => {
+    console.log("Check 1: Data arrays ready.");
+    
+    // Draw a test rectangle to see if the SVG is even working
+    svg.append("rect")
+       .attr("width", 50)
+       .attr("height", 50)
+       .attr("fill", "green");
+    console.log("Check 2: Green test square should be in top-left.");
 
-    console.log("Dataset successfully loaded!");
-    console.log("Total Records Count:", globalTerrorData.length);
-    console.log("First record preview:", globalTerrorData[0]);
+    drawMap(worldData, rawData);
+    drawPieChart(rawData);
+    drawSankey(rawData);
 
-    // Calculate sample metrics for console verification
-    const minYear = d3.min(globalTerrorData, d => d.year);
-    const maxYear = d3.max(globalTerrorData, d => d.year);
-    const totalKill = d3.sum(globalTerrorData, d => d.nkill);
-    console.log(`Year Range: ${minYear} - ${maxYear}`);
-    console.log(`Total Fatalities: ${totalKill}`);
+}).catch(err => console.error("Load Error:", err));
 
-    // Initalize the environment and setup empty graphs
-    initChart1();
-    initChart2();
-    initChart3();
+// --- 4. Drawing Functions ---
 
-}).catch(error => {
-    console.error("Error loading the CSV file:", error);
-});
+function drawMap(world, data) {
+    const g = svg.append("g").attr("transform", `translate(50, 50)`);
+    
+    const projection = d3.geoMercator() // Simpler projection for debugging
+        .scale(chart1Width / 6)
+        .translate([chart1Width / 2, chart1Height / 2]);
 
+    const path = d3.geoPath().projection(projection);
 
-// -------------------------------------------------------------
-// Chart 1: Temporal Overview (Line / Area Chart Space)
-// -------------------------------------------------------------
-function initChart1() {
-    const g1 = svg.append("g")
-                  .attr("id", "chart-temporal")
-                  .attr("transform", `translate(${chart1Left}, ${chart1Top})`);
+    g.append("text").text("Map Loading...").attr("y", -10);
 
-    // Title
-    g1.append("text")
-      .attr("x", chart1Width / 2)
-      .attr("y", -10)
-      .attr("font-size", "16px")
-      .attr("font-weight", "bold")
-      .attr("text-anchor", "middle")
-      .text("Chart 1: Temporal Trends (Incidents & Casualties Over Time)");
+    g.selectAll("path")
+        .data(topojson.feature(world, world.objects.countries).features)
+        .enter().append("path")
+        .attr("d", path)
+        .attr("fill", "#ddd")
+        .attr("stroke", "#fff");
 
-    // X Axis Group & Label
-    g1.append("g")
-      .attr("class", "x-axis")
-      .attr("transform", `translate(0, ${chart1Height})`);
+    const points = data.filter(d => d.latitude && d.longitude).slice(0, 1000);
+    console.log(`Check 3: Map has ${points.length} valid GPS points.`);
 
-    g1.append("text")
-      .attr("x", chart1Width / 2)
-      .attr("y", chart1Height + 40)
-      .attr("font-size", "12px")
-      .attr("text-anchor", "middle")
-      .text("Year");
-
-    // Y Axis Group & Label
-    g1.append("g")
-      .attr("class", "y-axis");
-
-    g1.append("text")
-      .attr("x", -(chart1Height / 2))
-      .attr("y", -45)
-      .attr("font-size", "12px")
-      .attr("text-anchor", "middle")
-      .attr("transform", "rotate(-90)")
-      .text("Count");
-
-    // Placeholder message for empty space
-    g1.append("text")
-      .attr("x", chart1Width / 2)
-      .attr("y", chart1Height / 2)
-      .attr("font-size", "14px")
-      .attr("fill", "#888")
-      .attr("text-anchor", "middle")
-      .attr("font-style", "italic")
-      .text("[ Chart Area 1 - Temporal Line/Area Graph Placeholder ]");
+    g.selectAll("circle")
+        .data(points)
+        .enter().append("circle")
+        .attr("cx", d => projection([d.longitude, d.latitude])[0])
+        .attr("cy", d => projection([d.longitude, d.latitude])[1])
+        .attr("r", 2)
+        .attr("fill", "red");
 }
 
+function drawPieChart(data) {
+    const centerX = width * 0.75;
+    const centerY = height * 0.25;
+    const g = svg.append("g").attr("transform", `translate(${centerX}, ${centerY})`);
 
-// -------------------------------------------------------------
-// Chart 2: Categorical Focus (Bar / Pie Chart Space)
-// -------------------------------------------------------------
-function initChart2() {
-    const g2 = svg.append("g")
-                  .attr("id", "chart-categorical")
-                  .attr("transform", `translate(${chart2Left}, ${chart2Top})`);
+    const rolled = d3.rollups(data, v => d3.sum(v, d => d.nkill), d => d.region);
+    console.log("Check 4: Pie data keys:", rolled.map(d => d[0]));
 
-    // Title
-    g2.append("text")
-      .attr("x", chart2Width / 2)
-      .attr("y", -10)
-      .attr("font-size", "16px")
-      .attr("font-weight", "bold")
-      .attr("text-anchor", "middle")
-      .text("Chart 2: Weapon & Attack Modalities");
+    const pie = d3.pie().value(d => d[1]);
+    const arc = d3.arc().innerRadius(0).outerRadius(100);
+    const color = d3.scaleOrdinal(d3.schemeCategory10);
 
-    // X Axis Group & Label
-    g2.append("g")
-      .attr("class", "x-axis")
-      .attr("transform", `translate(0, ${chart2Height})`);
-
-    g2.append("text")
-      .attr("x", chart2Width / 2)
-      .attr("y", chart2Height + 40)
-      .attr("font-size", "12px")
-      .attr("text-anchor", "middle")
-      .text("Category");
-
-    // Y Axis Group & Label
-    g2.append("g")
-      .attr("class", "y-axis");
-
-    g2.append("text")
-      .attr("x", -(chart2Height / 2))
-      .attr("y", -45)
-      .attr("font-size", "12px")
-      .attr("text-anchor", "middle")
-      .attr("transform", "rotate(-90)")
-      .text("Incidents");
-
-    // Placeholder message for empty space
-    g2.append("text")
-      .attr("x", chart2Width / 2)
-      .attr("y", chart2Height / 2)
-      .attr("font-size", "14px")
-      .attr("fill", "#888")
-      .attr("text-anchor", "middle")
-      .attr("font-style", "italic")
-      .text("[ Chart Area 2 - Categorical Graph Placeholder ]");
+    g.selectAll("path")
+        .data(pie(rolled))
+        .enter().append("path")
+        .attr("d", arc)
+        .attr("fill", (d, i) => color(i));
+    
+    g.append("text").text("Regional Fatalities").attr("text-anchor", "middle").attr("y", -120);
 }
 
+function drawSankey(data) {
+    const g = svg.append("g").attr("transform", `translate(50, ${height * 0.6})`);
+    
+    const sample = data.slice(0, 500);
+    const nodes = Array.from(new Set(sample.flatMap(d => [d.success ? "Success" : "Failed", d.attackType])), name => ({name}));
+    const nodeMap = new Map(nodes.map((d, i) => [d.name, i]));
+    
+    const links = d3.rollups(sample, v => v.length, d => (d.success ? "Success" : "Failed"), d => d.attackType)
+        .flatMap(([src, targets]) => targets.map(([tgt, count]) => ({
+            source: nodeMap.get(src),
+            target: nodeMap.get(tgt),
+            value: count
+        })));
 
-// -------------------------------------------------------------
-// Chart 3: Advanced Focus (Sankey / Parallel Coordinates Space)
-// -------------------------------------------------------------
-function initChart3() {
-    const g3 = svg.append("g")
-                  .attr("id", "chart-advanced")
-                  .attr("transform", `translate(${chart3Left}, ${chart3Top})`);
+    const sankey = d3.sankey()
+        .nodeWidth(20)
+        .nodePadding(10)
+        .extent([[0, 0], [chart3Width, chart3Height]]);
 
-    // Title
-    g3.append("text")
-      .attr("x", chart3Width / 2)
-      .attr("y", -15)
-      .attr("font-size", "16px")
-      .attr("font-weight", "bold")
-      .attr("text-anchor", "middle")
-      .text("Chart 3: Advanced Multi-Dimensional Flow (Sankey / PCP)");
+    const graph = sankey({
+        nodes: nodes.map(d => Object.assign({}, d)),
+        links: links.map(d => Object.assign({}, d))
+    });
 
-    // X Axis Group & Label
-    g3.append("g")
-      .attr("class", "x-axis")
-      .attr("transform", `translate(0, ${chart3Height})`);
+    console.log("Check 5: Sankey Graph generated.");
 
-    g3.append("text")
-      .attr("x", chart3Width / 2)
-      .attr("y", chart3Height + 40)
-      .attr("font-size", "12px")
-      .attr("text-anchor", "middle")
-      .text("Dimensions");
+    g.append("g")
+        .selectAll("path")
+        .data(graph.links)
+        .enter().append("path")
+        .attr("d", d3.sankeyLinkHorizontal())
+        .attr("stroke", "#000")
+        .attr("stroke-opacity", 0.2)
+        .attr("fill", "none")
+        .attr("stroke-width", d => d.width);
 
-    // Y Axis Group & Label
-    g3.append("g")
-      .attr("class", "y-axis");
-
-    g3.append("text")
-      .attr("x", -(chart3Height / 2))
-      .attr("y", -45)
-      .attr("font-size", "12px")
-      .attr("text-anchor", "middle")
-      .attr("transform", "rotate(-90)")
-      .text("Flow Value / Rate");
-
-    // Placeholder message for empty space
-    g3.append("text")
-      .attr("x", chart3Width / 2)
-      .attr("y", chart3Height / 2)
-      .attr("font-size", "14px")
-      .attr("fill", "#888")
-      .attr("text-anchor", "middle")
-      .attr("font-style", "italic")
-      .text("[ Chart Area 3 - Advanced Flow/Sankey Graph Placeholder ]");
+    g.append("g")
+        .selectAll("rect")
+        .data(graph.nodes)
+        .enter().append("rect")
+        .attr("x", d => d.x0)
+        .attr("y", d => d.y0)
+        .attr("height", d => d.y1 - d.y0)
+        .attr("width", d => d.x1 - d.x0)
+        .attr("fill", "blue");
 }
