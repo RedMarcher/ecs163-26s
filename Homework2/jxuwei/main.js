@@ -8,14 +8,14 @@ const formatComma = d3.format(",");
 
 // Data processing function
 function dataProcessor(d) {
+    // Anonymous function to calculate kill counts
     const nkill = d.nkill ? +d.nkill : 0;
-    const nwound = d.nwound ? +d.nwound : 0;
-    const casualties = nkill + nwound;
 
-    let killBin = "0 Deaths";
-    if (nkill > 0 && nkill <= 5) killBin = "1-5 Deaths";
-    else if (nkill > 5 && nkill <= 20) killBin = "6-20 Deaths";
-    else if (nkill > 20) killBin = "21+ Deaths";
+    // Sort kill counts into bins for the Sankey graph
+    let deathBins = "0 Deaths";
+    if (nkill > 0 && nkill <= 5) deathBins = "1-5 Deaths";
+    else if (nkill > 5 && nkill <= 20) deathBins = "6-20 Deaths";
+    else if (nkill > 20) deathBins = "21+ Deaths";
 
     return {
         success: +d.success === 1 ? "Successful" : "Unsuccessful",
@@ -24,12 +24,9 @@ function dataProcessor(d) {
         nkill: nkill,
         latitude: d.latitude ? +d.latitude : null,
         longitude: d.longitude ? +d.longitude : null,
-        killBin: killBin,
-        severity: casualties > 10 ? "High Casualty" : "Low/No Casualty"
+        killBin: deathBins
     };
 }
-
-const svg = d3.select("#main-svg");
 
 // Run data processing function and pass to functions
 Promise.all([
@@ -41,23 +38,28 @@ Promise.all([
     renderAll();
 });
 
-// Resize listener
+// Resize listener, used for dynamic rendering of SVG when window size changes
 window.addEventListener("resize", renderAll);
 
+// Declare shared SVG
+const svg = d3.select("#main-svg");
+
+// Draw shared SVG, designed to be easily callable for dynamic resizing
 function renderAll() {
     // Clear previous elements
     svg.selectAll("*").remove();
 
+    // Define dimensions for each graph
     const width = window.innerWidth;
     const height = window.innerHeight;
 
-    // Update display areas
     const leftWidth = width * 0.45;
     const rightWidth = width * 0.55;
     mapArea = { x: 0, y: 0, w: leftWidth, h: height * 0.5 };
     pieArea = { x: 0, y: height * 0.5, w: leftWidth, h: height * 0.5 };
     sankeyArea = { x: leftWidth + 40, y: 60, w: rightWidth - 80, h: height - 120 };
 
+    // Draw all three charts if data is done being processed (Needed because data crunching takes a while)
     if (globalWorldData && globalRawData) {
         drawMap(globalWorldData, globalRawData);
         drawSankey(globalRawData);
@@ -67,15 +69,16 @@ function renderAll() {
 
 // Chart 1: World map of all attack locations
 function drawMap(world, data) {
+    // Define main SVG group
     const g = svg.append("g").attr("transform", `translate(${mapArea.x}, ${mapArea.y + 60})`);
 
+    // Load blank map and projection
     const projection = d3.geoNaturalEarth1()
         .scale(mapArea.w / 6)
         .translate([mapArea.w / 2, mapArea.h / 2.5]);
-
     const path = d3.geoPath().projection(projection);
 
-    // Map Background
+    // Draw countries
     g.selectAll(".country")
         .data(topojson.feature(world, world.objects.countries).features)
         .enter().append("path")
@@ -83,7 +86,7 @@ function drawMap(world, data) {
         .attr("fill", "darkslategray")
         .attr("stroke", "gray");
 
-    // Attacks
+    // Plot attacks using provided longitude and latitude data
     g.selectAll("circle")
         .data(data.filter(d => d.latitude && d.longitude))
         .enter().append("circle")
@@ -93,9 +96,11 @@ function drawMap(world, data) {
         .attr("fill", "tomato")
         .attr("opacity", 0.4);
 
+    // Chart title 
     g.append("text").attr("class", "chart-title")
         .attr("x", mapArea.w / 2).attr("y", -30).text("Global Incident Hotspots");
 
+    // Chart legend
     g.append("text")
         .attr("x", mapArea.w / 2)
         .attr("y", -10)
@@ -107,15 +112,19 @@ function drawMap(world, data) {
 
 // Chart 2: Pie chart showing regional deaths
 function drawPieChart(data) {
-    const radius = Math.min(pieArea.w, pieArea.h) / 2.5;
+    // Define main svg group
     const g = svg.append("g")
         .attr("transform", `translate(${pieArea.x + pieArea.w / 3}, ${pieArea.y + pieArea.h / 2 + 30})`);
 
+    // Aggregate data (death tolls per region)
     const aggregated = d3.rollups(data, v => d3.sum(v, d => d.nkill), d => d.region)
         .sort((a, b) => b[1] - a[1]);
 
+    // Perform calculations for arcs relative to aggregated data
+    const radius = Math.min(pieArea.w, pieArea.h) / 2.5;
     const pie = d3.pie().value(d => d[1]);
     const arc = d3.arc().innerRadius(radius * 0.5).outerRadius(radius);
+
     // Exactly 12 named CSS colors for the 12 regions in the dataset
     const customColors = [
         "crimson",
@@ -133,6 +142,7 @@ function drawPieChart(data) {
     ];
     const color = d3.scaleOrdinal(customColors);
 
+    // Draw arcs based on relative size
     const arcs = g.selectAll(".arc")
         .data(pie(aggregated))
         .enter().append("g");
@@ -160,6 +170,12 @@ function drawPieChart(data) {
             tooltip.style("visibility", "hidden");
         });
 
+    // Chart label
+    g.append("text")
+        .attr("class", "chart-title")
+        .attr("y", -radius - 40)
+        .text("Fatalities by Region");
+
     // Legend
     const legend = g.append("g").attr("transform", `translate(${radius + 40}, -${radius})`);
     aggregated.forEach((d, i) => {
@@ -178,23 +194,18 @@ function drawPieChart(data) {
             .style("font-size", "11px")
             .attr("fill", "lightgray");
     });
-
-    g.append("text")
-        .attr("class", "chart-title")
-        .attr("y", -radius - 40)
-        .text("Fatalities by Region");
 }
 
 // Chart 3: Sankey chart showing progression of attacks
 function drawSankey(data) {
+    // Define main svg group
     const g = svg.append("g").attr("transform", `translate(${sankeyArea.x}, ${sankeyArea.y})`);
 
-    // Prepare Sankey data by aggregating (crucial for clean lines)
-    const sample = data.slice(0, 2000);
+    // Create links
     let links = [];
 
-    // Create links: AttackType -> (AttackType: Success)
-    const flow1 = d3.rollups(sample, v => v.length, d => d.attackType, d => d.success);
+    // AttackType to success/failure
+    const flow1 = d3.rollups(data, v => v.length, d => d.attackType, d => d.success);
     flow1.forEach(([src, targets]) => {
         targets.forEach(([tgt, val]) => {
             const uniqueTarget = `${src}: ${tgt}`;
@@ -202,8 +213,8 @@ function drawSankey(data) {
         });
     });
 
-    // Create links: (AttackType: Success) -> KillBin
-    const flow2 = d3.rollups(sample, v => v.length, d => d.attackType, d => d.success, d => d.killBin);
+    // Kill counts for successful vs failed attack types
+    const flow2 = d3.rollups(data, v => v.length, d => d.attackType, d => d.success, d => d.killBin);
     flow2.forEach(([attackType, successGroups]) => {
         successGroups.forEach(([success, killBins]) => {
             const uniqueSource = `${attackType}: ${success}`;
@@ -216,7 +227,6 @@ function drawSankey(data) {
     // Generate unique nodes
     const nodes = Array.from(new Set(links.flatMap(d => [d.source, d.target])), name => ({ name }));
     const nodeMap = new Map(nodes.map((d, i) => [d.name, i]));
-
     const formattedLinks = links.map(d => ({
         source: nodeMap.get(d.source),
         target: nodeMap.get(d.target),
@@ -225,15 +235,17 @@ function drawSankey(data) {
         outcome: d.outcome
     }));
 
-    const killBinOrder = ["0 Deaths", "1-5 Deaths", "6-20 Deaths", "21+ Deaths"];
+    // Custom ordering for death count
+    const deathCountBins = ["0 Deaths", "1-5 Deaths", "6-20 Deaths", "21+ Deaths"];
 
+    // Define sankey graph parameters
     const sankey = d3.sankey()
         .nodeWidth(20)
         .nodePadding(12)
         .extent([[0, 20], [sankeyArea.w, sankeyArea.h - 20]])
         .nodeSort((a, b) => {
-            if (killBinOrder.includes(a.name) && killBinOrder.includes(b.name)) {
-                return killBinOrder.indexOf(a.name) - killBinOrder.indexOf(b.name);
+            if (deathCountBins.includes(a.name) && deathCountBins.includes(b.name)) {
+                return deathCountBins.indexOf(a.name) - deathCountBins.indexOf(b.name);
             }
             return a.name.localeCompare(b.name);
         });
@@ -272,10 +284,11 @@ function drawSankey(data) {
     const node = g.append("g").attr("class", "nodes")
         .selectAll("g").data(graph.nodes).enter().append("g")
         .attr("class", "node")
+
+        // Code for interactive tooltips
         .on("mouseover", function (event, d) {
             d3.select(this).select("rect").style("opacity", 0.8);
 
-            // Clean up name for tooltip if it's a split outcome node
             let displayName = d.name;
             if (d.name.includes(": ")) {
                 const [cat, outcome] = d.name.split(": ");
@@ -295,8 +308,14 @@ function drawSankey(data) {
             tooltip.style("visibility", "hidden");
         });
 
+    // Categorical color scale for attack types
     const color = d3.scaleOrdinal(d3.schemeTableau10);
 
+    // Chart label 
+    g.append("text").attr("class", "chart-title").attr("x", sankeyArea.w / 2).attr("y", 0)
+        .text("Attack Lifecycle: Method → Outcome → Fatalities");
+
+    // Text for successful vs unsuccessful nodes
     node.append("rect")
         .attr("x", d => d.x0)
         .attr("y", d => d.y0)
@@ -307,9 +326,10 @@ function drawSankey(data) {
             if (d.name.includes("Successful")) return "crimson";
             return color(d.name);
         })
-        .attr("stroke", "#fff")
+        .attr("stroke", "white")
         .attr("stroke-width", 0.5);
 
+    // Attack method and death bin labels
     node.append("text")
         .attr("x", d => d.x0 < sankeyArea.w / 2 ? d.x1 + 6 : d.x0 - 6)
         .attr("y", d => (d.y1 + d.y0) / 2)
@@ -317,7 +337,4 @@ function drawSankey(data) {
         .attr("text-anchor", d => d.x0 < sankeyArea.w / 2 ? "start" : "end")
         .text(d => d.name.includes(": ") ? d.name.split(": ")[1] : d.name)
         .style("fill", "whitesmoke");
-
-    g.append("text").attr("class", "chart-title").attr("x", sankeyArea.w / 2).attr("y", 0)
-        .text("Attack Lifecycle: Method → Outcome → Fatalities");
 }
